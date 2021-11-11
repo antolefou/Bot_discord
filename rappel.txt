@@ -1,0 +1,6 @@
+il faudra cocher l'autorisation "application.commands" pour le serveur du projet tut
+
+il faut faire un "node deploy-commands.js" à chaque fois qu'on fait un changement à l'intérieur du fichier
+
+liens ci-dessous pour voir les options attribuable à une fonction "/" sur discord
+https://discordjs.guide/interactions/registering-slash-commands.html#options
