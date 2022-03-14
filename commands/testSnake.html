@@ -1,0 +1,276 @@
+<script>
+
+
+
+const name_size = 8;
+const level_up = 25;
+const WIDTH = 30;
+const HEIGHT = 15;
+const score_size = HEIGHT;
+
+// Game Controler
+class Snake {
+    constructor(width, height, { speed = 400, end = () => {}, tick = () => {}} = {}) {
+        this._start_speed = speed;
+        this._width = width;
+        this._height = height;
+        this._tick = tick;
+        this._end = end;
+        this._inc_points = 1;
+
+        this.empty();
+        this.reset();
+        this._scores = []
+    }
+    reset() {
+        this._level = 1;
+        this._points = 0;
+        this._speed = this._start_speed;
+    }
+    delay(time) {
+        return new Promise(resolve => {
+            setTimeout(resolve, time);
+        });
+    }
+    async start() {
+        this.reset();
+        const { _width, _height, _cb, eat } = this;
+        this._game = SnakeGame.prepare(_width, _height, _cb, eat.bind(this), this._end.bind(this));
+        while (true) {
+            // bug in matrix snake it throw exception on game over
+            try {
+                this.next();
+                this._tick(this.render());
+                await this.delay(this._speed);
+            } catch(e) {
+                // bug in matrix snake it throw exception on game over
+                this._end();
+                this._tick(this.render());
+                this.empty();
+                throw e;
+                break;
+            }
+        }
+    }
+    eat() {
+        this._points += this._inc_points;
+        if (this._points % level_up === 0) {
+            ++this._level;
+            if (this._speed > 100) {
+                this._speed -= 50;
+            } else if (this._speed > 50) {
+                // slow speed inc on higher level/speed
+                this._speed -= 10;
+            } else {
+                // more points on higher level/speed
+                this._inc_points++;
+            }
+        }
+    }
+    next() {
+        this._matrix = this._game.next();
+    }
+    char(chr) {
+        if (chr === 2) {
+            return '@';
+        }
+        if (chr === 1) {
+            return '#';
+        }
+        return ' ';
+    }
+    empty() {
+        this._matrix = [];
+        for (let i = 0; i < this._height; ++i) {
+            const line = new Array(this._width).fill(0);
+            this._matrix.push(line);
+        }
+    }
+    _sort_scores() {
+        this._scores.sort((a, b) => b.score - a.score);
+        if (this._scores.length > score_size) {
+            this._scores = this._scores.slice(0, score_size);
+        }
+    }
+    set score(name = 'Anon') {
+        if (!name) {
+            return;
+        }
+        if (name.length > name_size) {
+            name = name.substring(0, name_size);
+        }
+        const score = { name, score: this.points };
+        db_snake.push(score);
+    }
+    get scores() {
+        return this._scores;
+    }
+    get points() {
+        return this._points;
+    }
+    get level() {
+        return this._level;
+    }
+    status() {
+        return ' Score: ' + this._points + '; Level: ' + this._level;
+    }
+    render() {
+        return this._matrix.map(row => row.map(this.char).join('')).join('\n');
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Emitter is used to delay the keys that change direction
+// so you can execute fast keystrokes and it will move when new state is genrated
+// otherwise it may end the game if you trigger keys before new state is genrated
+class Emitter {
+    constructor(cb) {
+        this._cb = cb;
+        this._keys = [];
+        this._last = '';
+    }
+    append(key) {
+        this._keys.push(key);
+    }
+    emit(key) {
+        if (Emitter.opposite[this._last] !== key) {
+            this.append(key);
+        }
+    }
+    trigger() {
+        if (this._keys.length) {
+            const dir = this._keys.shift();
+            this._last = dir;
+            this._cb.emitDir(dir);
+        }
+    }
+}
+Emitter.opposite = oposite();
+
+// ------------------------------------------------------------------------------
+function oposite() {
+    const result = {
+        'up': 'down',
+        'left': 'right'
+    };
+
+    Object.entries(result).map(([k,v]) => {
+        result[v] = k;
+    });
+    return result;
+}
+
+// ------------------------------------------------------------------------------
+function frame(width, height) {
+    const line = '+' + new Array(width).fill('-').join('') + '+';
+    const empty = '|' + new Array(width).fill(' ').join('') + '|';
+    let output = [line, empty, line];
+    output = output.concat(new Array(height).fill(empty));
+    output.push(line);
+    return output.join('\n');
+}
+
+// ------------------------------------------------------------------------------
+function box(label) {
+    const line = '+' + new Array(label.length).fill('-').join('') + '+';
+    return [line, '|' + label + '|', line].join('\n');
+}
+
+// ------------------------------------------------------------------------------
+function format_score({name, score}) {
+    score = score.toString();
+    return ` ${name.padEnd(name_size + 1, ' ')} ${score.padStart(4, ' ')}`;
+}
+
+// ------------------------------------------------------------------------------
+class View {
+    constructor(controller, {render = () => {}} = {}) {
+        this._canvas = new Canvas(WIDTH + 3 + name_size + 7, HEIGHT + 4);
+        this._controller = controller;
+        this._render = render;
+        const left = new Item(frame(WIDTH, HEIGHT));
+        const right = new Item(frame(name_size + 8, HEIGHT), { x: WIDTH + 1 });
+
+        this._status = new Item('', { x: 1, y: 1 });
+        this._score = new Item('', { x: WIDTH + 2, y: 3 })
+        this._board = new Item(this._controller.render(), { x:1, y: 3 });
+
+        this._canvas.append(left);
+        this._canvas.append(right);
+        this._canvas.append(new Item('High Score', { x: WIDTH + 3, y: 1 }));
+        this._canvas.append(this._status);
+        this._canvas.append(this._score);
+        this._canvas.append(this._board);
+
+        this.render_score();
+
+        this._over_str = box(' Game Over ');
+        const over_lines = this._over_str.split('\n');
+        const size = {
+            width: over_lines[0].length,
+            height: over_lines.length
+        };
+        const x = Math.round((WIDTH + 1 - size.width) / 2);
+        const y = 2 + Math.round((HEIGHT - size.height) / 2)
+        this._over_box = new Item('', {x: x, y: y});
+        this._canvas.append(this._over_box);
+
+    }
+    render_score() {
+        this._score.update(this._controller.scores.map(format_score).join('\n'));
+    }
+    end() {
+        this._over_box.update(this._over_str);
+    }
+    render(str) {
+        this._status.update(this._controller.status());
+        this.render_score();
+        this._board.update(str);
+        this._render(this._canvas.toString());
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Game Init
+
+// game controller
+const game = new Snake(WIDTH, HEIGHT, {
+    end: () => {
+        end_game();
+        view.end();
+    },
+    tick: (str) => view.render(str)
+});
+// ASCII view of the game
+const view = new View(game, { render });
+
+
+
+// ------------------------------------------------------------------------------
+// DOM render code
+var pre = document.getElementsByTagName('pre')[0];
+
+function render(str) {
+    pre.innerHTML = str;
+}
+
+var dir_mapping = {
+    ArrowUp: 'up',
+    ArrowDown: 'down',
+    ArrowLeft: 'left',
+    ArrowRight: 'right'
+};
+
+function end_game() {
+    const name = prompt('Your Name');
+    game.score = name;
+}
+window.addEventListener('keydown', function(e) {
+    if (dir_mapping[e.key]) {
+        game.emit(dir_mapping[e.key]);
+    }
+});
+
+// ------------------------------------------------------------------------------
+game.start();
+</script>
