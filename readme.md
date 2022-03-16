@@ -19,3 +19,12 @@ exemple de code :
   "token": "Votre_token"
 }
 ```
+
+## Jouer dans le tchat Discord (Le bot n'est pas encore hébergé sur un serveur) 
+### Requis
+Télécharger et installer Better Discord 
+Ajouter le plugin à Discord : Bot_discord/better_discord_plugins/gameKeyLog.plugin.js
+
+### Utiilisation
+Démarrer le Bot en local 
+Utiliser la commande /playSnake et jouez au jeux
